@@ -169,7 +169,6 @@ class Controller:
             print(f"Error in get_position: {e}")
             return pyautogui.position()  # Return current position on error
 
-
     @staticmethod
     def cursor_moving():
         """
@@ -206,16 +205,9 @@ class Controller:
                 target_y = (Controller._prev_smooth_y + 
                         (target_y - Controller._prev_smooth_y) * 0.7)
             
-            # Move cursor with dynamic duration based on distance
+            # Move cursor with equation-based duration
             if distance > Controller._min_movement_threshold:
-                # Faster movement for larger distances
-                if distance > 50:
-                    duration = 0.001  # Very fast for large movements
-                elif distance > 20:
-                    duration = 0.003  # Fast for medium movements
-                else:
-                    duration = 0.008  # Slightly slower for small movements
-                
+                duration = max(0.001, 0.01 / (1 + 0.05 * distance))  # Smooth duration curve
                 pyautogui.moveTo(target_x, target_y, duration=duration)
             
             # Update smoothing history
