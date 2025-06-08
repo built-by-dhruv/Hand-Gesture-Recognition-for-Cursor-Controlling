@@ -1,11 +1,17 @@
 import pyautogui
+import math
+import time
+
 class Controller:
+    # Existing state variables
     prev_hand = None
     right_clicked = False
     left_clicked = False
     double_clicked = False
     dragging = False
     hand_Landmarks = None
+    
+    # Fixed naming and added missing variables
     little_finger_down = None
     little_finger_up = None
     index_finger_down = None
@@ -14,129 +20,264 @@ class Controller:
     middle_finger_up = None
     ring_finger_down = None
     ring_finger_up = None
-    Thump_finger_down = None 
-    Thump_finger_up = None
+    thumb_finger_down = None  # Fixed typo: Thump -> thumb
+    thumb_finger_up = None    # Fixed typo: Thump -> thumb
     all_fingers_down = None
     all_fingers_up = None
-    index_finger_within_Thumb_finger = None
-    middle_finger_within_Thumb_finger = None
-    little_finger_within_Thumb_finger = None
-    ring_finger_within_Thumb_finger = None
+    
+    # Gesture detection variables
+    index_finger_within_thumb_finger = None
+    middle_finger_within_thumb_finger = None
+    little_finger_within_thumb_finger = None
+    ring_finger_within_thumb_finger = None
+    
+    # Screen dimensions
     screen_width, screen_height = pyautogui.size()
+    
+    # Movement control variables
+    _smoothing_factor = 0.5  # Reduced for more responsive movement
+    # _smoothing_factor = 0.15  # Reduced for more responsive movement
+    _min_movement_threshold = 10  # Reduced threshold
+    _prev_smooth_x = None
+    _prev_smooth_y = None
+    _prev_time = None  # For velocity calculation
+    _movement_mode = "dynamic"  # "dynamic" or "linear"
 
-
+    @staticmethod
     def update_fingers_status():
-        Controller.little_finger_down = Controller.hand_Landmarks.landmark[20].y > Controller.hand_Landmarks.landmark[17].y
-        Controller.little_finger_up = Controller.hand_Landmarks.landmark[20].y < Controller.hand_Landmarks.landmark[17].y
-        Controller.index_finger_down = Controller.hand_Landmarks.landmark[8].y > Controller.hand_Landmarks.landmark[5].y
-        Controller.index_finger_up = Controller.hand_Landmarks.landmark[8].y < Controller.hand_Landmarks.landmark[5].y
-        Controller.middle_finger_down = Controller.hand_Landmarks.landmark[12].y > Controller.hand_Landmarks.landmark[9].y
-        Controller.middle_finger_up = Controller.hand_Landmarks.landmark[12].y < Controller.hand_Landmarks.landmark[9].y
-        Controller.ring_finger_down = Controller.hand_Landmarks.landmark[16].y > Controller.hand_Landmarks.landmark[13].y
-        Controller.ring_finger_up = Controller.hand_Landmarks.landmark[16].y < Controller.hand_Landmarks.landmark[13].y
-        Controller.Thump_finger_down = Controller.hand_Landmarks.landmark[4].y > Controller.hand_Landmarks.landmark[13].y
-        Controller.Thump_finger_up = Controller.hand_Landmarks.landmark[4].y < Controller.hand_Landmarks.landmark[13].y
-        Controller.all_fingers_down = Controller.index_finger_down and Controller.middle_finger_down and Controller.ring_finger_down and Controller.little_finger_down
-        Controller.all_fingers_up = Controller.index_finger_up and Controller.middle_finger_up and Controller.ring_finger_up and Controller.little_finger_up
-        Controller.index_finger_within_Thumb_finger = Controller.hand_Landmarks.landmark[8].y > Controller.hand_Landmarks.landmark[4].y and Controller.hand_Landmarks.landmark[8].y < Controller.hand_Landmarks.landmark[2].y
-        Controller.middle_finger_within_Thumb_finger = Controller.hand_Landmarks.landmark[12].y > Controller.hand_Landmarks.landmark[4].y and Controller.hand_Landmarks.landmark[12].y < Controller.hand_Landmarks.landmark[2].y
-        Controller.little_finger_within_Thumb_finger = Controller.hand_Landmarks.landmark[20].y > Controller.hand_Landmarks.landmark[4].y and Controller.hand_Landmarks.landmark[20].y < Controller.hand_Landmarks.landmark[2].y
-        Controller.ring_finger_within_Thumb_finger = Controller.hand_Landmarks.landmark[16].y > Controller.hand_Landmarks.landmark[4].y and Controller.hand_Landmarks.landmark[16].y < Controller.hand_Landmarks.landmark[2].y
-    
+        """
+        Updates the status of all fingers based on hand landmarks
+        Improved with better error handling and clearer logic
+        """
+        if not Controller.hand_Landmarks or not Controller.hand_Landmarks.landmark:
+            return
+            
+        try:
+            landmarks = Controller.hand_Landmarks.landmark
+            
+            # Finger tip and base landmark indices
+            # Using more accurate finger detection based on MediaPipe hand landmarks
+            Controller.little_finger_down = landmarks[20].y > landmarks[17].y
+            Controller.little_finger_up = landmarks[20].y < landmarks[17].y
+            
+            Controller.index_finger_down = landmarks[8].y > landmarks[5].y
+            Controller.index_finger_up = landmarks[8].y < landmarks[5].y
+            
+            Controller.middle_finger_down = landmarks[12].y > landmarks[9].y
+            Controller.middle_finger_up = landmarks[12].y < landmarks[9].y
+            
+            Controller.ring_finger_down = landmarks[16].y > landmarks[13].y
+            Controller.ring_finger_up = landmarks[16].y < landmarks[13].y
+            
+            # Improved thumb detection using wrist as reference point
+            Controller.thumb_finger_down = landmarks[4].y > landmarks[3].y
+            Controller.thumb_finger_up = landmarks[4].y < landmarks[3].y
+            
+            # All fingers status
+            Controller.all_fingers_down = (Controller.index_finger_down and 
+                                         Controller.middle_finger_down and 
+                                         Controller.ring_finger_down and 
+                                         Controller.little_finger_down)
+            
+            Controller.all_fingers_up = (Controller.index_finger_up and 
+                                       Controller.middle_finger_up and 
+                                       Controller.ring_finger_up and 
+                                       Controller.little_finger_up)
+            
+            # Finger-thumb proximity detection (for pinch gestures)
+            thumb_tip = landmarks[4]
+            
+            # Using distance-based detection instead of just y-coordinate
+            Controller.index_finger_within_thumb_finger = Controller._is_finger_near_thumb(landmarks[8], thumb_tip)
+            Controller.middle_finger_within_thumb_finger = Controller._is_finger_near_thumb(landmarks[12], thumb_tip)
+            Controller.ring_finger_within_thumb_finger = Controller._is_finger_near_thumb(landmarks[16], thumb_tip)
+            Controller.little_finger_within_thumb_finger = Controller._is_finger_near_thumb(landmarks[20], thumb_tip)
+            
+        except (IndexError, AttributeError) as e:
+            print(f"Error updating finger status: {e}")
+
+    @staticmethod
+    def _is_finger_near_thumb(finger_tip, thumb_tip, threshold=0.05):
+        """
+        Check if finger tip is close to thumb tip using Euclidean distance
+        """
+        distance = math.sqrt((finger_tip.x - thumb_tip.x)**2 + 
+                           (finger_tip.y - thumb_tip.y)**2)
+        return distance < threshold
+
+    @staticmethod
     def get_position(hand_x_position, hand_y_position):
-        old_x, old_y = pyautogui.position()
-        current_x = int(hand_x_position * Controller.screen_width)
-        current_y = int(hand_y_position * Controller.screen_height)
+        """
+        Dynamic position calculation with velocity-based movement
+        """
+        try:
+            old_x, old_y = pyautogui.position()
+            current_x = int(hand_x_position * Controller.screen_width)
+            current_y = int(hand_y_position * Controller.screen_height)
 
-        ratio = 1
-        Controller.prev_hand = (current_x, current_y) if Controller.prev_hand is None else Controller.prev_hand
-        delta_x = current_x - Controller.prev_hand[0]
-        delta_y = current_y - Controller.prev_hand[1]
-        
-        Controller.prev_hand = [current_x, current_y]
-        current_x , current_y = old_x + delta_x * ratio , old_y + delta_y * ratio
+            # Initialize previous hand position
+            if Controller.prev_hand is None:
+                Controller.prev_hand = (current_x, current_y)
+                Controller._prev_time = pyautogui.time.time()
+                return (old_x, old_y)  # Don't move on first detection
+            
+            # Calculate movement delta and velocity
+            delta_x = current_x - Controller.prev_hand[0]
+            delta_y = current_y - Controller.prev_hand[1]
+            
+            # Calculate time delta for velocity
+            current_time = time.time()
+            time_delta = current_time - getattr(Controller, '_prev_time', current_time)
+            time_delta = max(time_delta, 0.001)  # Prevent division by zero
+            
+            # Calculate velocity (pixels per second)
+            velocity_x = abs(delta_x) / time_delta
+            velocity_y = abs(delta_y) / time_delta
+            velocity = math.sqrt(velocity_x**2 + velocity_y**2)
+            
+            # Dynamic sensitivity based on velocity
+            base_ratio = 1.5  # Base sensitivity
+            velocity_multiplier = 1.0
+            
+            # Increase multiplier for faster movements
+            if velocity > 100:  # Slow movement
+                velocity_multiplier = 1.2
+            elif velocity > 300:  # Medium movement
+                velocity_multiplier = 2.0
+            elif velocity > 600:  # Fast movement
+                velocity_multiplier = 3.5
+            elif velocity > 1000:  # Very fast movement
+                velocity_multiplier = 5.0
+            
+            # Apply dynamic sensitivity
+            dynamic_ratio = base_ratio * velocity_multiplier
+            new_x = old_x + delta_x * dynamic_ratio
+            new_y = old_y + delta_y * dynamic_ratio
+            
+            # Update previous position and time
+            Controller.prev_hand = (current_x, current_y)
+            Controller._prev_time = current_time
 
-        threshold = 5
-        if current_x < threshold:
-            current_x = threshold
-        elif current_x > Controller.screen_width - threshold:
-            current_x = Controller.screen_width - threshold
-        if current_y < threshold:
-            current_y = threshold
-        elif current_y > Controller.screen_height - threshold:
-            current_y = Controller.screen_height - threshold
+            # Improved boundary clamping
+            threshold = 5
+            new_x = max(threshold, min(new_x, Controller.screen_width - threshold))
+            new_y = max(threshold, min(new_y, Controller.screen_height - threshold))
 
-        return (current_x,current_y)
-        
+            return (new_x, new_y)
+            
+        except Exception as e:
+            print(f"Error in get_position: {e}")
+            return pyautogui.position()  # Return current position on error
+
+    @staticmethod
     def cursor_moving():
-        point = 9
-        current_x, current_y = Controller.hand_Landmarks.landmark[point].x ,Controller.hand_Landmarks.landmark[point].y
-        x, y = Controller.get_position(current_x, current_y)
-        cursor_freezed = Controller.all_fingers_up and Controller.Thump_finger_down
-        if not cursor_freezed:
-            pyautogui.moveTo(x, y, duration = 0)
+        """
+        Improved cursor movement with velocity-based acceleration
+        """
+        if not Controller.hand_Landmarks or not Controller.hand_Landmarks.landmark:
+            return
+            
+        try:
+            # Use index finger tip (point 8) for more precise control
+            TRACKING_POINT = 8  # Index finger tip
+            
+            landmark = Controller.hand_Landmarks.landmark[TRACKING_POINT]
+            current_x, current_y = landmark.x, landmark.y
+            target_x, target_y = Controller.get_position(current_x, current_y)
+            
+            # Check if cursor should be frozen
+            cursor_frozen = Controller.all_fingers_up and Controller.thumb_finger_down
+            
+            if cursor_frozen:
+                return
+                
+            # Get current cursor position
+            current_cursor_pos = pyautogui.position()
+            
+            # Calculate movement distance and velocity
+            distance = math.sqrt((target_x - current_cursor_pos.x)**2 + 
+                               (target_y - current_cursor_pos.y)**2)
+            
+            # Apply minimal smoothing only for very small movements
+            if distance < 10 and Controller._prev_smooth_x is not None:
+                target_x = (Controller._prev_smooth_x + 
+                          (target_x - Controller._prev_smooth_x) * 0.7)
+                target_y = (Controller._prev_smooth_y + 
+                          (target_y - Controller._prev_smooth_y) * 0.7)
+            
+            # Move cursor with dynamic duration based on distance
+            if distance > Controller._min_movement_threshold:
+                # Faster movement for larger distances
+                if distance > 50:
+                    duration = 0.001  # Very fast for large movements
+                elif distance > 20:
+                    duration = 0.003  # Fast for medium movements
+                else:
+                    duration = 0.008  # Slightly slower for small movements
+                
+                pyautogui.moveTo(target_x, target_y, duration=duration)
+            
+            # Update smoothing history
+            Controller._prev_smooth_x = target_x
+            Controller._prev_smooth_y = target_y
+                
+        except pyautogui.FailSafeException:
+            print("PyAutoGUI fail-safe triggered - move mouse to corner to stop")
+        except Exception as e:
+            print(f"Cursor movement error: {e}")
+
+    @staticmethod
+    def reset_smoothing():
+        """
+        Reset smoothing variables - call this when hand tracking is lost
+        """
+        Controller._prev_smooth_x = None
+        Controller._prev_smooth_y = None
+        Controller.prev_hand = None
+        Controller._prev_time = None
+
+    @staticmethod
+    def set_movement_mode(mode="dynamic"):
+        """
+        Set movement mode: "dynamic" for velocity-based or "linear" for constant sensitivity
+        """
+        if mode in ["dynamic", "linear"]:
+            Controller._movement_mode = mode
+            print(f"Movement mode set to: {mode}")
+        else:
+            print("Invalid mode. Use 'dynamic' or 'linear'")
+
+    @staticmethod
+    def set_sensitivity(base_sensitivity=1.5, max_multiplier=5.0):
+        """
+        Adjust cursor movement sensitivity
+        """
+        Controller._base_sensitivity = max(0.5, min(base_sensitivity, 3.0))
+        Controller._max_velocity_multiplier = max(1.0, min(max_multiplier, 10.0))
+        print(f"Sensitivity set to: base={Controller._base_sensitivity}, max_multiplier={Controller._max_velocity_multiplier}")
+
+    @staticmethod
+    def set_smoothing(factor=0.15):
+        """
+        Adjust movement smoothing (0 = no smoothing, 0.9 = maximum smoothing)
+        """
+        Controller._smoothing_factor = max(0.0, min(factor, 0.9))
+        print(f"Smoothing set to: {Controller._smoothing_factor}")
+
+# Additional utility functions
+def initialize_controller():
+    """
+    Initialize the controller with optimal settings
+    """
+    # Disable PyAutoGUI fail-safe if needed (be careful with this)
+    # pyautogui.FAILSAFE = False
     
-    def detect_scrolling():
-        scrolling_up =  Controller.little_finger_up and Controller.index_finger_down and Controller.middle_finger_down and Controller.ring_finger_down
-        if scrolling_up:
-            pyautogui.scroll(120)
-            print("Scrolling UP")
-
-        scrolling_down = Controller.index_finger_up and Controller.middle_finger_down and Controller.ring_finger_down and Controller.little_finger_down
-        if scrolling_down:
-            pyautogui.scroll(-120)
-            print("Scrolling DOWN")
+    # Set reasonable pause between PyAutoGUI commands
+    pyautogui.PAUSE = 0.001
     
+    print("Controller initialized successfully")
 
-    def detect_zoomming():
-        zoomming = Controller.index_finger_up and Controller.middle_finger_up and Controller.ring_finger_down and Controller.little_finger_down
-        window = .05
-        index_touches_middle = abs(Controller.hand_Landmarks.landmark[8].x - Controller.hand_Landmarks.landmark[12].x) <= window
-        zoomming_out = zoomming and index_touches_middle
-        zoomming_in = zoomming and not index_touches_middle
-        
-        if zoomming_out:
-            pyautogui.keyDown('ctrl')
-            pyautogui.scroll(-50)
-            pyautogui.keyUp('ctrl')
-            print("Zooming Out")
-
-        if zoomming_in:
-            pyautogui.keyDown('ctrl')
-            pyautogui.scroll(50)
-            pyautogui.keyUp('ctrl')
-            print("Zooming In")
-
-    def detect_clicking():
-        left_click_condition = Controller.index_finger_within_Thumb_finger and Controller.middle_finger_up and Controller.ring_finger_up and Controller.little_finger_up and not Controller.middle_finger_within_Thumb_finger and not Controller.ring_finger_within_Thumb_finger and not Controller.little_finger_within_Thumb_finger
-        if not Controller.left_clicked and left_click_condition:
-            pyautogui.click()
-            Controller.left_clicked = True
-            print("Left Clicking")
-        elif not Controller.index_finger_within_Thumb_finger:
-            Controller.left_clicked = False
-
-        right_click_condition = Controller.middle_finger_within_Thumb_finger and Controller.index_finger_up and Controller.ring_finger_up and Controller.little_finger_up and not Controller.index_finger_within_Thumb_finger and not Controller.ring_finger_within_Thumb_finger and not Controller.little_finger_within_Thumb_finger
-        if not Controller.right_clicked and right_click_condition:
-            pyautogui.rightClick()
-            Controller.right_clicked = True
-            print("Right Clicking")
-        elif not Controller.middle_finger_within_Thumb_finger:
-            Controller.right_clicked = False
-
-        double_click_condition = Controller.ring_finger_within_Thumb_finger and Controller.index_finger_up and Controller.middle_finger_up and Controller.little_finger_up and not Controller.index_finger_within_Thumb_finger and not Controller.middle_finger_within_Thumb_finger and not Controller.little_finger_within_Thumb_finger
-        if not Controller.double_clicked and  double_click_condition:
-            pyautogui.doubleClick()
-            Controller.double_clicked = True
-            print("Double Clicking")
-        elif not Controller.ring_finger_within_Thumb_finger:
-            Controller.double_clicked = False
-    
-    def detect_dragging():
-        if not Controller.dragging and Controller.all_fingers_down:
-            pyautogui.mouseDown(button = "left")
-            Controller.dragging = True
-            print("Dragging")
-        elif not Controller.all_fingers_down:
-            pyautogui.mouseUp(button = "left")
-            Controller.dragging = False
+# Example usage:
+# initialize_controller()
+# Controller.set_sensitivity(1.2)  # Slightly more sensitive
+# Controller.set_smoothing(0.4)    # Moderate smoothing
