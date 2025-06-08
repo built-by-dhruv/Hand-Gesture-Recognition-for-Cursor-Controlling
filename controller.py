@@ -1,28 +1,7 @@
+from config import Config
 import pyautogui
 import math
 import time
-
-class Config:
-    """
-    Configuration class for adjustable cursor movement parameters.
-    Modify these values to test different cursor behaviors.
-    """
-    # Duration equation parameters: duration = max(min_duration, base_duration / (1 + k * distance))
-    MIN_DURATION = 0.0001  # Minimum duration (seconds) for large movements
-                          # Test range: 0.0005 (very fast) to 0.002 (smoother)
-    BASE_DURATION = 0.001  # Baseline duration (seconds) for small movements
-                          # Test range: 0.008 (faster) to 0.012 (smoother)
-    K = 10              # Scaling factor for duration decay
-                          # Test range: 0.03 (slower decay) to 0.07 (faster decay)
-    
-    # PyAutoGUI pause (seconds) after each command
-    PAUSE = 0.001         # Test range: 0.0005 (more responsive) to 0.005 (more stable)
-    
-    # Smoothing factor for small movements (0 = no smoothing, 0.9 = max smoothing)
-    SMOOTHING_FACTOR = 0.1  # Test range: 0.4 (less smooth) to 0.8 (very smooth)
-    
-    # Minimum movement threshold (pixels) to trigger cursor movement
-    MIN_MOVEMENT_THRESHOLD = 5  # Test range: 6 (finer control) to 10 (less sensitive)
 
 class Controller:
     # Existing state variables
@@ -153,9 +132,9 @@ class Controller:
             acceleration = math.sqrt(acceleration_x**2 + acceleration_y**2)
 
             # Continuous multiplier equation using both velocity and acceleration
-            base_ratio = 1.5
-            alpha = 0.000000000001  # velocity influence
-            beta = 0.000099   # acceleration influence
+            base_ratio = Config.BASE_RATIO
+            alpha = Config.ALPHA  # velocity influence
+            beta = Config.BETA   # acceleration influence
             velocity_multiplier = 1 + alpha * velocity + beta * acceleration
 
             dynamic_ratio = base_ratio * velocity_multiplier
