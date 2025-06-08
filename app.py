@@ -205,16 +205,17 @@ class HandTrackingApp:
         print("Application closed successfully")
 
 def main():
-   """Main function"""
-   # For even more aggressive movement:
-   Controller.set_sensitivity(base_sensitivity=1, max_multiplier=1.0)
-
-   try:
-      app = HandTrackingApp()
-      app.run()
-   except Exception as e:
-      print(f"Failed to initialize application: {e}")
-      print("Please check your camera connection and try again")
+    """Main function"""
+    # For even more aggressive movement:
+    #    Controller.set_sensitivity(base_sensitivity=1, max_multiplier=1.0)
+    Controller.set_smoothing(factor=0.7)
+    # Controller.
+    try:
+        app = HandTrackingApp()
+        app.run()
+    except Exception as e:
+        print(f"Failed to initialize application: {e}")
+        print("Please check your camera connection and try again")
 
 if __name__ == "__main__":
    main()

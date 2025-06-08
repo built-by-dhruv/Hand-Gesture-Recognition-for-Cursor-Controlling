@@ -169,17 +169,18 @@ class Controller:
             print(f"Error in get_position: {e}")
             return pyautogui.position()  # Return current position on error
 
+
     @staticmethod
     def cursor_moving():
         """
-        Improved cursor movement with velocity-based acceleration
+        Improved cursor movement with velocity-based acceleration, tracking the wrist for stability
         """
         if not Controller.hand_Landmarks or not Controller.hand_Landmarks.landmark:
             return
             
         try:
-            # Use index finger tip (point 8) for more precise control
-            TRACKING_POINT = 8  # Index finger tip
+            # Use wrist (point 0) for more stable control
+            TRACKING_POINT = 0  # Wrist landmark
             
             landmark = Controller.hand_Landmarks.landmark[TRACKING_POINT]
             current_x, current_y = landmark.x, landmark.y
@@ -196,14 +197,14 @@ class Controller:
             
             # Calculate movement distance and velocity
             distance = math.sqrt((target_x - current_cursor_pos.x)**2 + 
-                               (target_y - current_cursor_pos.y)**2)
+                            (target_y - current_cursor_pos.y)**2)
             
             # Apply minimal smoothing only for very small movements
             if distance < 10 and Controller._prev_smooth_x is not None:
                 target_x = (Controller._prev_smooth_x + 
-                          (target_x - Controller._prev_smooth_x) * 0.7)
+                        (target_x - Controller._prev_smooth_x) * 0.7)
                 target_y = (Controller._prev_smooth_y + 
-                          (target_y - Controller._prev_smooth_y) * 0.7)
+                        (target_y - Controller._prev_smooth_y) * 0.7)
             
             # Move cursor with dynamic duration based on distance
             if distance > Controller._min_movement_threshold:
@@ -226,6 +227,7 @@ class Controller:
         except Exception as e:
             print(f"Cursor movement error: {e}")
 
+        
     @staticmethod
     def reset_smoothing():
         """
@@ -273,7 +275,7 @@ def initialize_controller():
     # pyautogui.FAILSAFE = False
     
     # Set reasonable pause between PyAutoGUI commands
-    pyautogui.PAUSE = 0.001
+    pyautogui.PAUSE = 0.01
     
     print("Controller initialized successfully")
 
