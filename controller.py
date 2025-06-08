@@ -8,21 +8,21 @@ class Config:
     Modify these values to test different cursor behaviors.
     """
     # Duration equation parameters: duration = max(min_duration, base_duration / (1 + k * distance))
-    MIN_DURATION = 0.001  # Minimum duration (seconds) for large movements
+    MIN_DURATION = 0.0001  # Minimum duration (seconds) for large movements
                           # Test range: 0.0005 (very fast) to 0.002 (smoother)
-    BASE_DURATION = 0.01  # Baseline duration (seconds) for small movements
+    BASE_DURATION = 0.001  # Baseline duration (seconds) for small movements
                           # Test range: 0.008 (faster) to 0.012 (smoother)
-    K = 0.9              # Scaling factor for duration decay
+    K = 10              # Scaling factor for duration decay
                           # Test range: 0.03 (slower decay) to 0.07 (faster decay)
     
     # PyAutoGUI pause (seconds) after each command
-    PAUSE = 0.00009         # Test range: 0.0005 (more responsive) to 0.005 (more stable)
+    PAUSE = 0.001         # Test range: 0.0005 (more responsive) to 0.005 (more stable)
     
     # Smoothing factor for small movements (0 = no smoothing, 0.9 = max smoothing)
-    SMOOTHING_FACTOR = 5  # Test range: 0.4 (less smooth) to 0.8 (very smooth)
+    SMOOTHING_FACTOR = 0.1  # Test range: 0.4 (less smooth) to 0.8 (very smooth)
     
     # Minimum movement threshold (pixels) to trigger cursor movement
-    MIN_MOVEMENT_THRESHOLD = 10  # Test range: 6 (finer control) to 10 (less sensitive)
+    MIN_MOVEMENT_THRESHOLD = 5  # Test range: 6 (finer control) to 10 (less sensitive)
 
 class Controller:
     # Existing state variables
@@ -121,7 +121,8 @@ class Controller:
     @staticmethod
     def get_position(hand_x_position, hand_y_position):
         """
-        Dynamic position calculation with velocity-based movement
+        Dynamic position calculation with velocity and acceleration (rate of change in position)
+        Uses a continuous equation for velocity multiplier based on both velocity and acceleration.
         """
         try:
             old_x, old_y = pyautogui.position()
@@ -131,6 +132,7 @@ class Controller:
             if Controller.prev_hand is None:
                 Controller.prev_hand = (current_x, current_y)
                 Controller._prev_time = time.time()
+                Controller._prev_velocity = (0, 0)
                 return (old_x, old_y)
             
             delta_x = current_x - Controller.prev_hand[0]
@@ -140,28 +142,29 @@ class Controller:
             time_delta = current_time - getattr(Controller, '_prev_time', current_time)
             time_delta = max(time_delta, 0.001)
             
-            velocity_x = abs(delta_x) / time_delta
-            velocity_y = abs(delta_y) / time_delta
+            velocity_x = delta_x / time_delta
+            velocity_y = delta_y / time_delta
             velocity = math.sqrt(velocity_x**2 + velocity_y**2)
-            
+
+            # Calculate acceleration (rate of change of velocity)
+            prev_velocity_x, prev_velocity_y = getattr(Controller, '_prev_velocity', (0, 0))
+            acceleration_x = (velocity_x - prev_velocity_x) / time_delta
+            acceleration_y = (velocity_y - prev_velocity_y) / time_delta
+            acceleration = math.sqrt(acceleration_x**2 + acceleration_y**2)
+
+            # Continuous multiplier equation using both velocity and acceleration
             base_ratio = 1.5
-            velocity_multiplier = 1.0
-            
-            if velocity > 100:
-                velocity_multiplier = 1.2
-            elif velocity > 300:
-                velocity_multiplier = 2.0
-            elif velocity > 600:
-                velocity_multiplier = 3.5
-            elif velocity > 1000:
-                velocity_multiplier = 5.0
-            
+            alpha = 0.000000000001  # velocity influence
+            beta = 0.000099   # acceleration influence
+            velocity_multiplier = 1 + alpha * velocity + beta * acceleration
+
             dynamic_ratio = base_ratio * velocity_multiplier
             new_x = old_x + delta_x * dynamic_ratio
             new_y = old_y + delta_y * dynamic_ratio
-            
+
             Controller.prev_hand = (current_x, current_y)
             Controller._prev_time = current_time
+            Controller._prev_velocity = (velocity_x, velocity_y)
 
             threshold = 5
             new_x = max(threshold, min(new_x, Controller.screen_width - threshold))
@@ -198,14 +201,14 @@ class Controller:
             distance = math.sqrt((target_x - current_cursor_pos.x)**2 + 
                                (target_y - current_cursor_pos.y)**2)
             
-            if distance < 10 and Controller._prev_smooth_x is not None:
+            if distance < 10 and Controller._prev_smooth_x is not None and Controller._prev_smooth_y is not None:
                 target_x = (Controller._prev_smooth_x + 
-                          (target_x - Controller._prev_smooth_x) * 0.7)
+                          (target_x - Controller._prev_smooth_x) * 0.9)
                 target_y = (Controller._prev_smooth_y + 
-                          (target_y - Controller._prev_smooth_y) * 0.7)
+                          (target_y - Controller._prev_smooth_y) * 0.9)
             
             if distance > Controller._min_movement_threshold:
-                duration = max(Config.MIN_DURATION, Config.BASE_DURATION / (1 + Config.K * distance))
+                duration = max(Config.MIN_DURATION, Config.BASE_DURATION / (5 + Config.K * distance))
                 print(f"Distance: {distance:.2f}, Duration: {duration:.4f}")  # Debugging output
                 pyautogui.moveTo(target_x, target_y, duration=duration)
             
@@ -244,7 +247,7 @@ class Controller:
         Adjust cursor movement sensitivity
         """
         Controller._base_sensitivity = max(0.5, min(base_sensitivity, 3.0))
-        Controller._max_velocity_multiplier = max(1.0, min(max_multiplier, 10.0))
+        Controller._max_velocity_multiplier = max(10.0, min(max_multiplier, 50.0))
         print(f"Sensitivity set to: base={Controller._base_sensitivity}, max_multiplier={Controller._max_velocity_multiplier}")
 
     @staticmethod

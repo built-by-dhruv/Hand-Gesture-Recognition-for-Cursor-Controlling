@@ -29,14 +29,14 @@ class HandTrackingApp:
         if not self.cap.isOpened():
             raise Exception("Error: Could not open camera")
         
-        self.mpHands = mp.solutions.hands
+        self.mpHands = mp.solutions.hands # type: ignore
         self.hands = self.mpHands.Hands(
             static_image_mode=False,
             max_num_hands=1,
-            min_detection_confidence=0.7,
+            min_detection_confidence=0.5,
             min_tracking_confidence=0.5
         )
-        self.mpDraw = mp.solutions.drawing_utils
+        self.mpDraw = mp.solutions.drawing_utils # type: ignore
         
         self.prev_time = 0
         self.fps_counter = 0
@@ -44,7 +44,7 @@ class HandTrackingApp:
         
         self.hand_detected = False
         self.frames_without_hand = 0
-        self.max_frames_without_hand = 10
+        self.max_frames_without_hand = 1
         
         print("Hand Tracking Controller initialized successfully!")
         print("Controls:")
@@ -98,10 +98,10 @@ class HandTrackingApp:
                 img, 
                 Controller.hand_Landmarks, 
                 self.mpHands.HAND_CONNECTIONS,
-                landmark_drawing_spec=mp.solutions.drawing_utils.DrawingSpec(
+                landmark_drawing_spec=self.mpDraw.DrawingSpec(
                     color=(0, 0, 255), thickness=2, circle_radius=2
                 ),
-                connection_drawing_spec=mp.solutions.drawing_utils.DrawingSpec(
+                connection_drawing_spec=self.mpDraw.DrawingSpec(
                     color=(0, 255, 0), thickness=2
                 )
             )
@@ -110,14 +110,14 @@ class HandTrackingApp:
                 Controller.update_fingers_status()
                 Controller.cursor_moving()
                 
-                if hasattr(Controller, 'detect_scrolling'):
-                    Controller.detect_scrolling()
-                if hasattr(Controller, 'detect_zoomming'):
-                    Controller.detect_zoomming()
-                if hasattr(Controller, 'detect_clicking'):
-                    Controller.detect_clicking()
-                if hasattr(Controller, 'detect_dragging'):
-                    Controller.detect_dragging()
+                # if hasattr(Controller, 'detect_scrolling'):
+                #     Controller.detect_scrolling()
+                # if hasattr(Controller, 'detect_zoomming'):
+                #     Controller.detect_zoomming()
+                # if hasattr(Controller, 'detect_clicking'):
+                #     Controller.detect_clicking()
+                # if hasattr(Controller, 'detect_dragging'):
+                #     Controller.detect_dragging()
                     
             except Exception as e:
                 print(f"Error in controller methods: {e}")
@@ -174,7 +174,7 @@ class HandTrackingApp:
 
 def main():
     """Main function"""
-    Controller.set_sensitivity(base_sensitivity=1.8, max_multiplier=1.0)  # Optimized for wrist tracking
+    Controller.set_sensitivity(base_sensitivity=10, max_multiplier=5.0)  # Optimized for wrist tracking
     initialize_controller()
 
     try:
