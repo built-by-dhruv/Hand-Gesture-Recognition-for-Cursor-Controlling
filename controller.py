@@ -46,6 +46,10 @@ class Controller:
     _smoothed_hand_y = None
     _prev_cursor_x = None
     _prev_cursor_y = None
+    # Left-click hold state (for three-finger pinch)
+    _left_hold = False
+    # Debounce for right click on middle-thumb pinch
+    _right_click_pressed = False
 
     # Config sync lock
     _config_lock = threading.Lock()
@@ -109,9 +113,11 @@ class Controller:
                 current_time = time.time()
                 
                 # Initialize on first run
-                if Controller._prev_cursor_x is None or Controller._prev_time is None:
-                    Controller._prev_cursor_x = hand_x_position * Controller.screen_width
-                    Controller._prev_cursor_y = hand_y_position * Controller.screen_height
+                raw_x = hand_x_position * Controller.screen_width
+                raw_y = hand_y_position * Controller.screen_height
+                if Controller._prev_cursor_x is None or Controller._prev_time is None or Controller._prev_cursor_y is None:
+                    Controller._prev_cursor_x = raw_x
+                    Controller._prev_cursor_y = raw_y
                     Controller._prev_time = current_time
                     return (0, 0)
 
@@ -120,10 +126,11 @@ class Controller:
                 if dt == 0:
                     return (0, 0)
 
-                # 1. Exponential Smoothing on raw hand position
-                alpha = Config.SMOOTHING_FACTOR
-                x_smooth = alpha * (hand_x_position * Controller.screen_width) + (1 - alpha) * Controller._prev_cursor_x
-                y_smooth = alpha * (hand_y_position * Controller.screen_height) + (1 - alpha) * Controller._prev_cursor_y
+                # 1. Exponential Smoothing on raw hand position (clamp alpha to [0,1])
+                alpha = max(0.0, min(float(Config.SMOOTHING_FACTOR), 1.0))
+                # prev_cursor_x/y are guaranteed not None here
+                x_smooth = alpha * raw_x + (1 - alpha) * Controller._prev_cursor_x
+                y_smooth = alpha * raw_y + (1 - alpha) * Controller._prev_cursor_y
 
                 # 2. Relative delta scaled by sensitivity (no extra acceleration)
                 dx_raw = x_smooth - Controller._prev_cursor_x
@@ -156,18 +163,30 @@ class Controller:
             Controller._prev_time = None
             Controller._prev_cursor_x = None
             Controller._prev_cursor_y = None
+            # Ensure left button is released if it was held
+            Controller.release_left_hold()
             return
-            
+
+        # Freeze gesture: all fingers up while thumb down -> no movement
         try:
-            # Use the midpoint of the ring and little finger tips for tracking
+            if Controller.all_fingers_up and Controller.thumb_finger_down:
+                Controller.reset_smoothing()
+                # Ensure left button is released while frozen
+                Controller.release_left_hold()
+                return
+        except Exception:
+            # If attributes missing, ignore
+            pass
+        try:
+            # Use the midpoint of the ring and little finger tips for tracking (Right hand only)
             ring_finger_tip = Controller.hand_Landmarks.landmark[16]
             little_finger_tip = Controller.hand_Landmarks.landmark[20]
-            
+
             current_x = (ring_finger_tip.x + little_finger_tip.x) / 2
             current_y = (ring_finger_tip.y + little_finger_tip.y) / 2
-            
+
             delta_x, delta_y = Controller.get_position(current_x, current_y)
-            
+
             # The movement threshold is now applied to the calculated delta
             if math.hypot(delta_x, delta_y) > Config.MIN_MOVEMENT_THRESHOLD:
                 pyautogui.move(delta_x, delta_y)
@@ -211,10 +230,57 @@ class Controller:
         Controller._smoothing_factor = max(0.0, min(factor, 0.9))
         print(f"Smoothing set to: {Controller._smoothing_factor}")
 
+    @staticmethod
+    def release_left_hold():
+        """Release left mouse button if currently held by triple pinch."""
+        try:
+            if getattr(Controller, '_left_hold', False):
+                try:
+                    pyautogui.mouseUp(button='left')
+                except pyautogui.FailSafeException:
+                    print("PyAutoGUI fail-safe triggered - move mouse to corner to stop")
+                Controller._left_hold = False
+        except Exception as e:
+            print(f"Error releasing left hold: {e}")
+
+    @staticmethod
+    def handle_left_click_hold(index_thumb_pinch: bool):
+        """Press/hold left button while index-thumb pinch is true; release on unpinch."""
+        try:
+            if index_thumb_pinch and not Controller._left_hold:
+                try:
+                    pyautogui.mouseDown(button='left')
+                    Controller._left_hold = True
+                except pyautogui.FailSafeException:
+                    print("PyAutoGUI fail-safe triggered - move mouse to corner to stop")
+            elif not index_thumb_pinch and Controller._left_hold:
+                Controller.release_left_hold()
+        except Exception as e:
+            print(f"Left click hold error: {e}")
+
+    @staticmethod
+    def handle_right_click(middle_thumb_pinch: bool):
+        """Single right click on rising edge of middle-thumb pinch."""
+        try:
+            if middle_thumb_pinch and not Controller._right_click_pressed:
+                try:
+                    pyautogui.click(button='right')
+                except pyautogui.FailSafeException:
+                    print("PyAutoGUI fail-safe triggered - move mouse to corner to stop")
+                Controller._right_click_pressed = True
+            elif not middle_thumb_pinch and Controller._right_click_pressed:
+                Controller._right_click_pressed = False
+        except Exception as e:
+            print(f"Right click error: {e}")
+
 def initialize_controller():
     """
     Initialize controller and set config-dependent runtime variables.
     """
     pyautogui.PAUSE = Config.PAUSE
+    try:
+        pyautogui.FAILSAFE = bool(getattr(Config, 'FAILSAFE', True))
+    except Exception:
+        pass
     Controller.set_smoothing(Config.SMOOTHING_FACTOR)
     # No need to reload, Config is shared

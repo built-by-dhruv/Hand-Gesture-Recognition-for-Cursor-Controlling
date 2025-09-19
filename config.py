@@ -31,6 +31,8 @@ DEFAULTS = {
     "MIN_MOVEMENT_THRESHOLD": 10,
     "SENSITIVITY": 0.6,
     "TARGET_FPS": 30,
+    "FAILSAFE": True,
+    "INVERT_HANDS": False,
 }
 
 
@@ -48,6 +50,8 @@ class Config:
     MIN_MOVEMENT_THRESHOLD = user_cfg.get("MIN_MOVEMENT_THRESHOLD", DEFAULTS["MIN_MOVEMENT_THRESHOLD"])
     SENSITIVITY = user_cfg.get("SENSITIVITY", DEFAULTS["SENSITIVITY"])
     TARGET_FPS = user_cfg.get("TARGET_FPS", DEFAULTS["TARGET_FPS"])
+    FAILSAFE = user_cfg.get("FAILSAFE", DEFAULTS["FAILSAFE"])
+    INVERT_HANDS = user_cfg.get("INVERT_HANDS", DEFAULTS["INVERT_HANDS"])
 
     # Shared state for controller
     running = False
