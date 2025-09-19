@@ -4,63 +4,85 @@ from config import Config, save_config
 import app
 
 controller_thread = None
-controller_running = False
 
-def update_config(min_duration, base_duration, k, pause, smoothing_factor, min_movement_threshold, base_ratio, alpha, beta):
+
+def update_config(pause, smoothing_factor, min_movement_threshold, sensitivity, target_fps):
+    """Update configuration parameters from the Gradio UI and persist them."""
     cfg = {
-        "MIN_DURATION": min_duration,
-        "BASE_DURATION": base_duration,
-        "K": k,
         "PAUSE": pause,
         "SMOOTHING_FACTOR": smoothing_factor,
         "MIN_MOVEMENT_THRESHOLD": min_movement_threshold,
-        "BASE_RATIO": base_ratio,
-        "ALPHA": alpha,
-        "BETA": beta
+    "SENSITIVITY": sensitivity,
+    "TARGET_FPS": int(target_fps),
     }
     Config.update_from_dict(cfg)
     save_config(cfg)
-    return f"Config updated and saved!\nMIN_DURATION={min_duration}\nBASE_DURATION={base_duration}\nK={k}\nPAUSE={pause}\nSMOOTHING_FACTOR={smoothing_factor}\nMIN_MOVEMENT_THRESHOLD={min_movement_threshold}\nBASE_RATIO={base_ratio}\nALPHA={alpha}\nBETA={beta}"
+    msg = (
+        f"Config updated and saved!\n"
+        f"PAUSE={pause}\nSMOOTHING_FACTOR={smoothing_factor}\n"
+    f"MIN_MOVEMENT_THRESHOLD={min_movement_threshold}\nSENSITIVITY={sensitivity}\nTARGET_FPS={int(target_fps)}\n"
+    )
+    print(msg)
+    return msg
 
 def start_controller():
-    global controller_thread, controller_running
-    if controller_running:
-        return "Controller already running."
+    """
+    Start the hand gesture controller in a background thread.
+    """
+    global controller_thread
+    with Config.lock:
+        if Config.running:
+            return "Controller already running."
+        Config.running = True
     def run_app():
         try:
             app.main()
         except Exception as e:
             print(f"Controller stopped: {e}")
+            with Config.lock:
+                Config.running = False
     controller_thread = threading.Thread(target=run_app, daemon=True)
     controller_thread.start()
-    controller_running = True
     return "Controller started!"
 
 def stop_controller():
-    global controller_running
-    controller_running = False
-    return "To stop the controller, close the app window or press ESC in the app window."
+    """
+    Stop the controller by setting the running flag to False.
+    """
+    with Config.lock:
+        Config.running = False
+    return "Controller stopping... (may take a moment)"
+
+def get_status():
+    with Config.lock:
+        if Config.running:
+            return "Controller is RUNNING"
+        else:
+            return "Controller is STOPPED"
+
+def reset_smoothing():
+    from controller import Controller
+    Controller.reset_smoothing()
+    return "Smoothing reset!"
 
 with gr.Blocks() as demo:
     gr.Markdown("# Cursor Controller Config & Launcher")
+    status = gr.Textbox(label="Controller Status", value=get_status(), interactive=False)
     with gr.Row():
-        min_duration = gr.Slider(0.00001, 0.01, value=Config.MIN_DURATION, label="MIN_DURATION (snappiness)")
-        base_duration = gr.Slider(0.0001, 0.01, value=Config.BASE_DURATION, label="BASE_DURATION (base speed)")
-        k = gr.Slider(0.1, 50, value=Config.K, label="K (duration decay)")
-        pause = gr.Slider(0.0001, 0.01, value=Config.PAUSE, label="PAUSE (responsiveness)")
+        pause = gr.Slider(0.0001, 0.01, value=Config.PAUSE, label="PAUSE (pyautogui pause)", step=0.00001)
+        smoothing_factor = gr.Slider(0.0, 10.0, value=Config.SMOOTHING_FACTOR, label="SMOOTHING_FACTOR (alpha)", step=0.01)
     with gr.Row():
-        smoothing_factor = gr.Slider(0.0, 0.9, value=Config.SMOOTHING_FACTOR, label="SMOOTHING_FACTOR (smoothness)")
-        min_movement_threshold = gr.Slider(1, 30, value=Config.MIN_MOVEMENT_THRESHOLD, label="MIN_MOVEMENT_THRESHOLD (jitter ignore)")
-        base_ratio = gr.Slider(0.1, 5.0, value=Config.BASE_RATIO, label="BASE_RATIO (sensitivity)")
-    with gr.Row():
-        alpha = gr.Slider(0.0, 0.00001, value=Config.ALPHA, label="ALPHA (velocity effect)")
-        beta = gr.Slider(0.0, 0.01, value=Config.BETA, label="BETA (acceleration effect)")
+        min_movement_threshold = gr.Slider(0, 100, value=Config.MIN_MOVEMENT_THRESHOLD, label="MIN_MOVEMENT_THRESHOLD (dead zone)", step=1)
+        sensitivity = gr.Slider(0.1, 50.0, value=Config.SENSITIVITY, label="SENSITIVITY (speed multiplier)", step=0.05)
+        target_fps = gr.Slider(5, 60, value=Config.TARGET_FPS, label="TARGET_FPS (camera pacing)", step=1)
     update_btn = gr.Button("Update Config")
     start_btn = gr.Button("Start Controller")
     stop_btn = gr.Button("Stop Controller")
+    reset_btn = gr.Button("Reset Smoothing")
     output = gr.Textbox(label="Status")
-    update_btn.click(fn=update_config, inputs=[min_duration, base_duration, k, pause, smoothing_factor, min_movement_threshold, base_ratio, alpha, beta], outputs=output)
+    update_btn.click(fn=update_config, inputs=[pause, smoothing_factor, min_movement_threshold, sensitivity, target_fps], outputs=output)
     start_btn.click(fn=start_controller, outputs=output)
     stop_btn.click(fn=stop_controller, outputs=output)
+    reset_btn.click(fn=reset_smoothing, outputs=output)
 
 demo.launch()

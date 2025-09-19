@@ -18,16 +18,27 @@ import cv2
 import mediapipe as mp
 import time
 from controller import Controller, Config , initialize_controller
+from utils.fps_meter import FPSMeter
+from video.capture_manager import CaptureManager
+
+def reload_config():
+    """
+    Reload config values from config.json and update the Config class and controller runtime.
+    """
+    import importlib
+    import config as config_module
+    importlib.reload(config_module)
+    global Config
+    Config = config_module.Config
+    initialize_controller()
 
 class HandTrackingApp:
     def __init__(self):
-        self.cap = cv2.VideoCapture(0)
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-        self.cap.set(cv2.CAP_PROP_FPS, 30)
-        
-        if not self.cap.isOpened():
-            raise Exception("Error: Could not open camera")
+        """
+        Initialize the Hand Tracking Application, setting up camera, Mediapipe hands module,
+        and other necessary parameters. Print control instructions for the user.
+        """
+        self.capture = CaptureManager(device_index=0, width=640, height=480, target_fps=Config.TARGET_FPS)
         
         self.mpHands = mp.solutions.hands # type: ignore
         self.hands = self.mpHands.Hands(
@@ -38,8 +49,7 @@ class HandTrackingApp:
         )
         self.mpDraw = mp.solutions.drawing_utils # type: ignore
         
-        self.prev_time = 0
-        self.fps_counter = 0
+        self.fps_meter = FPSMeter(window=30, ema_alpha=0.9)
         self.fps_display = 0
         
         self.hand_detected = False
@@ -51,21 +61,19 @@ class HandTrackingApp:
         print("- Move wrist to control cursor")
         print("- All fingers up + thumb down = freeze cursor")
         print("- ESC key to exit")
-        print("Adjust parameters in Config class (controller.py) to test cursor behavior.")
+        print("Adjust parameters in the Gradio UI for real-time tuning.")
         
     def calculate_fps(self):
-        current_time = time.time()
-        fps = 1 / (current_time - self.prev_time) if self.prev_time != 0 else 0
-        self.prev_time = current_time
-        
-        self.fps_counter += 1
-        if self.fps_counter >= 10:
-            self.fps_display = int(fps)
-            self.fps_counter = 0
-            
+        """Update and return smoothed FPS using FPSMeter."""
+        self.fps_display = self.fps_meter.get_int()
         return self.fps_display
     
     def draw_info_overlay(self, img):
+        """
+        Draw overlay information on the image, including FPS, hand detection status,
+        and cursor status (active or frozen). This information helps in understanding
+        the current state of the application and the detected hand.
+        """
         height, width = img.shape[:2]
         
         fps = self.calculate_fps()
@@ -88,6 +96,12 @@ class HandTrackingApp:
                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
     
     def process_hand_landmarks(self, results, img):
+        """
+        Process the hand landmarks detected in the current frame, updating the controller
+        state and drawing the landmarks and connections on the image. This method also
+        handles the detection of various hand gestures and updates the cursor movement
+        accordingly.
+        """
         if results.multi_hand_landmarks:
             self.hand_detected = True
             self.frames_without_hand = 0
@@ -130,9 +144,14 @@ class HandTrackingApp:
                     Controller.reset_smoothing()
     
     def run(self):
+        """
+        Main application loop. Processes webcam frames, updates controller, and checks running flag.
+        """
         try:
-            while True:
-                success, img = self.cap.read()
+            while Config.running:
+                # keep capture target fps in sync with config
+                self.capture.set_target_fps(Config.TARGET_FPS)
+                success, img = self.capture.read()
                 
                 if not success:
                     print("Error: Failed to read from camera")
@@ -145,7 +164,8 @@ class HandTrackingApp:
                 results = self.hands.process(imgRGB)
                 
                 self.process_hand_landmarks(results, img)
-                
+                # tick FPS after processing a frame
+                self.fps_meter.tick()
                 self.draw_info_overlay(img)
                 
                 cv2.imshow('Hand Gesture Controller', img)
@@ -154,29 +174,26 @@ class HandTrackingApp:
                 if key == 27:  # ESC key
                     print("Exiting application...")
                     break
-                elif key == ord('r'):
-                    print("Resetting controller...")
-                    if hasattr(Controller, 'reset_smoothing'):
-                        Controller.reset_smoothing()
-                        
         except KeyboardInterrupt:
             print("\nApplication interrupted by user")
         except Exception as e:
             print(f"Unexpected error: {e}")
         finally:
             self.cleanup()
-    
+
     def cleanup(self):
+        """
+        Release resources and close all windows on exit.
+        """
         print("Cleaning up...")
-        self.cap.release()
+        self.capture.release()
         cv2.destroyAllWindows()
         print("Application closed successfully")
 
 def main():
-    """Main function"""
-    Controller.set_sensitivity(base_sensitivity=10, max_multiplier=5.0)  # Optimized for wrist tracking
-    initialize_controller()
-
+    """
+    Main function to run the hand tracking app.
+    """
     try:
         app = HandTrackingApp()
         app.run()
